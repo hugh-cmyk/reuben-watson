@@ -385,9 +385,10 @@ function damage(mech, amount) {
 function updatePlayer(dt) {
   const p = player;
 
-  // Desired velocity in the camera's horizontal frame (stick up = away).
+  // Desired velocity in the camera's horizontal frame (stick up = away,
+  // stick right = screen right). cr is the camera's actual right axis.
   const cf = tmp.set(Math.sin(camYaw), 0, Math.cos(camYaw));
-  const cr = tmp2.set(Math.cos(camYaw), 0, -Math.sin(camYaw));
+  const cr = tmp2.set(-Math.cos(camYaw), 0, Math.sin(camYaw));
   const desX = cf.x * input.y + cr.x * input.x;
   const desZ = cf.z * input.y + cr.z * input.x;
   const desVX = desX * MAX_SPEED;
