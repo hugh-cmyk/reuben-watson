@@ -23,7 +23,7 @@ const ACCEL = 38;              // how quickly it reaches top speed (heavy feel)
 const FRICTION = 10;           // slow-down when the stick is released
 const TURN_RATE = 7;           // how fast the mech swings to face its heading
 const GRAVITY = 32;
-const JUMP_VELOCITY = 13;
+const JUMP_VELOCITY = 20;       // ~6.2 units high, clears the mesas
 const MECH_R = 1.7;            // horizontal collision radius
 const BULLET_SPEED = 70;
 const PLAYER_FIRE_RATE = 0.16; // seconds between shots
@@ -54,6 +54,12 @@ function lerpAngle(a, b, t) {
   let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * clamp(t, 0, 1);
+}
+// Shortest signed angle from a to b, in [-PI, PI].
+function angleDiff(a, b) {
+  let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 // Gentle rolling dunes. Used for both the visible terrain and ground sampling.
 function terrainHeight(x, z) {
@@ -411,9 +417,17 @@ function updatePlayer(dt) {
   const gh = groundHeightAt(p.pos.x, p.pos.z, p.pos.y);
   if (p.pos.y <= gh) { p.pos.y = gh; p.vy = 0; p.grounded = true; } else { p.grounded = false; }
 
-  // Face the heading
+  // Face the heading. Turn toward the move direction for forward / sideways
+  // input, but keep the current facing when the stick is pulled back so the
+  // mech reverses (moonwalks) backward instead of spinning around.
   const speed = Math.hypot(p.vel.x, p.vel.z);
-  if (speed > 0.6) p.yaw = lerpAngle(p.yaw, Math.atan2(p.vel.x, p.vel.z), TURN_RATE * dt);
+  const inMag = Math.hypot(input.x, input.y);
+  if (inMag > 0.15 && speed > 0.6) {
+    const moveAng = Math.atan2(desX, desZ);
+    if (Math.abs(angleDiff(p.yaw, moveAng)) <= Math.PI * 0.6) {
+      p.yaw = lerpAngle(p.yaw, moveAng, TURN_RATE * dt);
+    }
+  }
 
   // Dust from the feet while striding on the ground
   if (p.grounded && speed > 3 && Math.random() < speed * dt * 0.25) {
