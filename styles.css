@@ -1,0 +1,242 @@
+/* ============================================================
+   Robot & Dragon Battle - styling for the menu screens.
+   The battle itself is drawn on the <canvas>; this file styles
+   the page, the canvas frame, and the HTML overlay screens.
+   ============================================================ */
+
+:root {
+  --bg-0: #05030f;
+  --bg-1: #0d0830;
+  --panel: rgba(12, 10, 38, 0.82);
+  --neon-cyan: #2ff3ff;
+  --neon-magenta: #ff3df0;
+  --neon-green: #59ff8f;
+  --neon-purple: #9a6bff;
+  --text: #eaf6ff;
+  --text-dim: #9aa6d6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  min-height: 100%;
+  padding: 1.5rem;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #1a1150 0%, transparent 60%),
+    linear-gradient(160deg, var(--bg-1), var(--bg-0));
+  color: var(--text);
+  font-family: "Orbitron", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Canvas frame ---------------------------------------- */
+
+#game-wrap {
+  position: relative;
+  width: min(96vw, 960px);
+  aspect-ratio: 960 / 600;        /* keeps the 16:10-ish battle shape */
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 2px rgba(47, 243, 255, 0.35),
+    0 0 36px rgba(47, 243, 255, 0.25),
+    0 18px 60px rgba(0, 0, 0, 0.6);
+}
+
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #05030f;
+  cursor: crosshair;             /* feels like an aiming reticle in battle */
+}
+
+/* ---- Overlay screens ------------------------------------- */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.2rem;
+  background: rgba(4, 3, 16, 0.55);
+  backdrop-filter: blur(4px);
+  text-align: center;
+}
+
+.overlay.hidden { display: none; }
+
+.panel {
+  width: min(560px, 100%);
+  padding: 2rem 1.8rem;
+  background: var(--panel);
+  border: 1px solid rgba(47, 243, 255, 0.35);
+  border-radius: 18px;
+  box-shadow: 0 0 30px rgba(47, 243, 255, 0.15), inset 0 0 30px rgba(154, 107, 255, 0.08);
+}
+
+.panel-wide { width: min(760px, 100%); }
+
+.kicker {
+  font-size: 0.8rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--neon-magenta);
+  margin-bottom: 0.6rem;
+}
+
+.title {
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  font-weight: 900;
+  line-height: 1.05;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(47, 243, 255, 0.7), 0 0 30px rgba(255, 61, 240, 0.4);
+}
+
+.title .amp { color: var(--neon-magenta); }
+
+.screen-heading {
+  font-size: clamp(1.3rem, 3.5vw, 2rem);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 1.2rem;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(47, 243, 255, 0.6);
+}
+
+.lead {
+  margin: 0.9rem auto 1.4rem;
+  max-width: 44ch;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--text-dim);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.result {
+  font-size: clamp(2rem, 6vw, 3.4rem);
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #fff;
+}
+
+.result.win { text-shadow: 0 0 16px var(--neon-green), 0 0 36px rgba(89, 255, 143, 0.5); }
+.result.lose { text-shadow: 0 0 16px var(--neon-magenta), 0 0 36px rgba(255, 61, 240, 0.5); }
+
+/* ---- Buttons --------------------------------------------- */
+
+.btn {
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #04121a;
+  background: linear-gradient(180deg, #7ff7ff, var(--neon-cyan));
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+  box-shadow: 0 0 18px rgba(47, 243, 255, 0.55);
+}
+
+.btn-big { padding: 0.85rem 2.4rem; font-size: 1.05rem; }
+
+.btn:hover { transform: translateY(-2px); box-shadow: 0 0 26px rgba(47, 243, 255, 0.8); }
+.btn:active { transform: translateY(0); }
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* ---- Robot selection cards ------------------------------- */
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  justify-content: center;
+  margin-bottom: 1.4rem;
+}
+
+.card {
+  width: 134px;
+  padding: 0.9rem 0.7rem;
+  background: rgba(8, 6, 26, 0.9);
+  border: 1.5px solid rgba(154, 107, 255, 0.35);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+  text-align: center;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 18px rgba(47, 243, 255, 0.35);
+}
+
+.card.selected {
+  border-color: var(--neon-green);
+  box-shadow: 0 0 22px rgba(89, 255, 143, 0.5);
+}
+
+/* The little robot avatar drawn with a canvas inside each card. */
+.card canvas {
+  width: 64px;
+  height: 64px;
+  display: block;
+  margin: 0 auto 0.5rem;
+}
+
+.card-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.card-tag {
+  margin: 0.25rem 0 0.55rem;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  min-height: 1.6em;
+}
+
+/* Tiny stat meters (speed / health / power) on each card. */
+.stat { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.stat-label {
+  width: 12px;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  font-family: monospace;
+}
+.stat-track {
+  flex: 1;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.stat-fill { height: 100%; border-radius: 3px; }
+
+.footnote {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  text-align: center;
+}
