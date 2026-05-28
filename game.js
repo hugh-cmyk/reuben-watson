@@ -28,12 +28,39 @@ let PLAYER_ZONE = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
 let ENEMY_ZONE  = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
 
 // Touch devices (phones, tablets) get on-screen buttons and lighter effects.
-const IS_TOUCH = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
-const LOW_FX = IS_TOUCH;           // fewer particles, no glow blur on mobile
-
-// Hard caps so effects stay cheap, especially on phones.
-const MAX_PARTICLES = LOW_FX ? 90 : 200;
+// touchMode can also flip on the first real touch: some iPads report no touch
+// points until the screen is actually touched, so static detection can miss.
+function detectTouch() {
+  return ('ontouchstart' in window) ||
+         (navigator.maxTouchPoints > 0) ||
+         (window.matchMedia && window.matchMedia('(any-pointer: coarse)').matches);
+}
+let touchMode = detectTouch();
+let LOW_FX = touchMode;            // fewer particles, no glow blur on touch
+let MAX_PARTICLES = touchMode ? 90 : 200;
 const MAX_BULLETS = 70;
+
+// Apply the current touch mode. CSS keys off the body's "is-touch" class so the
+// layout (fullscreen vs framed) always agrees with whether buttons are shown.
+function applyTouchMode() {
+  LOW_FX = touchMode;
+  MAX_PARTICLES = touchMode ? 90 : 200;
+  if (document.body) document.body.classList.toggle('is-touch', touchMode);
+}
+applyTouchMode();
+
+// Turn on touch mode the first time the screen is actually touched.
+function enableTouchMode() {
+  if (touchMode) return;
+  touchMode = true;
+  applyTouchMode();
+  if (canvas) resize();                         // relayout for the touch zones
+  if (state === 'battle') setTouchControls(true);
+}
+
+function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
+function now() { return performance.now(); }
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
@@ -135,7 +162,7 @@ function showScreen(name) {
 /* Show or hide the on-screen touch buttons (only on touch devices). */
 function setTouchControls(on) {
   if (!dom.touch) return;
-  dom.touch.classList.toggle('hidden', !(on && IS_TOUCH));
+  dom.touch.classList.toggle('hidden', !(on && touchMode));
 }
 
 /* ---------- 3b. Responsive layout ------------------------- */
@@ -150,7 +177,7 @@ function layout() {
   const top = SKY_H + groundH * 0.20;
   // On touch we keep the robots in the upper part of the ground so the
   // bottom corners stay free for the Fire / Special buttons.
-  const bottom = SKY_H + groundH * (IS_TOUCH ? 0.50 : 0.92);
+  const bottom = SKY_H + groundH * (touchMode ? 0.50 : 0.92);
 
   PLAYER_ZONE = { xMin: VW * 0.06, xMax: VW * 0.42, yMin: top, yMax: bottom };
   ENEMY_ZONE  = { xMin: VW * 0.58, xMax: VW * 0.94, yMin: top, yMax: bottom };
@@ -162,7 +189,7 @@ function resize() {
   const rect = canvas.getBoundingClientRect();
   VW = Math.max(320, Math.round(rect.width));
   VH = Math.max(240, Math.round(rect.height));
-  DPR = Math.min(window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2);
+  DPR = Math.min(window.devicePixelRatio || 1, touchMode ? 1.5 : 2);
 
   canvas.width = Math.round(VW * DPR);
   canvas.height = Math.round(VH * DPR);
@@ -777,7 +804,7 @@ function drawHUD() {
   drawMeter(14 + metW + 10, 54, metW, 'E', shieldFrac, player.shieldActive ? '#7ff7ff' : '#2ff3ff');
 
   // The on-screen buttons explain themselves on touch, so only desktop needs text.
-  if (!IS_TOUCH) {
+  if (!touchMode) {
     ctx.fillStyle = 'rgba(234, 246, 255, 0.65)';
     ctx.font = '13px Orbitron, sans-serif';
     ctx.textAlign = 'center';
@@ -1008,7 +1035,7 @@ function init() {
   dom.resultSub = document.getElementById('result-sub');
   dom.touch = document.getElementById('touch-controls');
 
-  if (IS_TOUCH) document.body.classList.add('is-touch');
+  applyTouchMode();
 
   resize();
   positionDragons();
@@ -1024,16 +1051,55 @@ function init() {
   });
   document.getElementById('restart-btn').addEventListener('click', goToSelect);
 
-  // --- Movement: pointer events cover both mouse (hover) and touch (drag) ---
-  function pointerToCanvas(e) {
+  // --- Movement ---
+  // Mouse (desktop): the robot follows the cursor (absolute position).
+  // Touch: the robot follows your finger as you drag (relative movement), so
+  // you can steer it from anywhere on the screen instead of having to keep your
+  // finger over the robot's narrow lane.
+  let movePointerId = null;
+  let dragLast = null;
+
+  function setAbsolute(e) {
     const rect = canvas.getBoundingClientRect();
     mouse.x = (e.clientX - rect.left) * (VW / rect.width);
     mouse.y = (e.clientY - rect.top) * (VH / rect.height);
-    mouse.inside = true;
   }
-  canvas.addEventListener('pointerdown', function (e) { e.preventDefault(); pointerToCanvas(e); }, { passive: false });
-  canvas.addEventListener('pointermove', function (e) { pointerToCanvas(e); }, { passive: false });
-  canvas.addEventListener('pointerleave', function () { mouse.inside = false; });
+  function dragRelative(e) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = clamp(mouse.x + (e.clientX - dragLast.x) * (VW / rect.width), PLAYER_ZONE.xMin, PLAYER_ZONE.xMax);
+    mouse.y = clamp(mouse.y + (e.clientY - dragLast.y) * (VH / rect.height), PLAYER_ZONE.yMin, PLAYER_ZONE.yMax);
+    dragLast = { x: e.clientX, y: e.clientY };
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (e.pointerType === 'touch') {
+      if (movePointerId !== null) return;            // ignore extra fingers on the canvas
+      movePointerId = e.pointerId;
+      dragLast = { x: e.clientX, y: e.clientY };       // begin the drag without jumping
+    } else {
+      setAbsolute(e);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (e.pointerType === 'touch') {
+      if (e.pointerId !== movePointerId || !dragLast) return;
+      dragRelative(e);
+    } else {
+      setAbsolute(e);
+    }
+  }, { passive: false });
+
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) {
+    canvas.addEventListener(ev, function (e) {
+      if (e.pointerId === movePointerId) { movePointerId = null; dragLast = null; }
+    });
+  });
+
+  // If static detection missed (some iPads), the first touch turns touch mode on.
+  window.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') enableTouchMode(); }, true);
+  window.addEventListener('touchstart', enableTouchMode, { capture: true, passive: true });
 
   // --- Touch action buttons ---
   bindHold(document.getElementById('fire-btn'),
