@@ -2,29 +2,38 @@
    Robot & Dragon Battle
    A simple 2D canvas game. No build step, no dependencies.
 
-   How it is organised:
-     1. Config + helper functions
-     2. ROBOTS data (edit this to tweak the fighters)
-     3. Game state + screen switching
-     4. Robot / bullet / particle / dragon logic
-     5. The main loop (update + render)
-     6. Input handling and start-up
+   Works on desktop, iPad and phones:
+     - Desktop: mouse moves the robot, Space fires, Q special, E shield, R restart.
+     - Touch:   drag to move, on-screen Fire / Special / Shield buttons, and the
+                Restart button on the win/lose screen.
 
-   The player moves with the mouse and fires with the keyboard.
-   Q is a special weapon, E is a shield, R restarts after a result.
+   The "world" is responsive. Instead of a fixed 960x600 grid, the layout is
+   recomputed from the live canvas size (VW x VH) so the game fills whatever
+   screen it is on without cropping. See resize() and layout().
    ============================================================ */
 
 'use strict';
 
 /* ---------- 1. Config + helpers --------------------------- */
 
-const CANVAS_W = 960;
-const CANVAS_H = 600;
-const SKY_H = 250;                 // top region for the dragons / sky
+// Live game-world size in CSS pixels. Set by resize(); do not hard-code sizes.
+let VW = 960;
+let VH = 600;
+let SKY_H = 250;                   // height of the sky band, set in layout()
+let DPR = 1;                       // device pixel ratio used for crisp rendering
+let robotPixelScale = 1;           // scales robots to the screen height
 
-// Where each robot is allowed to move (its centre point stays inside this box).
-const PLAYER_ZONE = { xMin: 70,  xMax: 400, yMin: 320, yMax: 545 };
-const ENEMY_ZONE  = { xMin: 560, xMax: 885, yMin: 320, yMax: 545 };
+// Movement boxes for each robot (centre point stays inside). Set in layout().
+let PLAYER_ZONE = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
+let ENEMY_ZONE  = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 };
+
+// Touch devices (phones, tablets) get on-screen buttons and lighter effects.
+const IS_TOUCH = (navigator.maxTouchPoints > 0) || ('ontouchstart' in window);
+const LOW_FX = IS_TOUCH;           // fewer particles, no glow blur on mobile
+
+// Hard caps so effects stay cheap, especially on phones.
+const MAX_PARTICLES = LOW_FX ? 90 : 200;
+const MAX_BULLETS = 70;
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
@@ -104,17 +113,16 @@ let particles = [];
 let dragons = [];
 let fireballs = [];
 
-// Background decoration, built once at start-up.
+// Background decoration, rebuilt whenever the canvas resizes.
 let stars = [];
 let buildings = [];
 let gridOffset = 0;
 
 const keys = {};                   // currently held keys, e.g. keys[' ']
-const mouse = { x: CANVAS_W * 0.2, y: 430, inside: false };
+const mouse = { x: 200, y: 300, inside: false };  // also used for the touch finger
 let lastTime = 0;
 
-// DOM references, filled in on load.
-const dom = {};
+const dom = {};                    // DOM references, filled in on load
 
 /* Show one overlay screen and hide the others. Passing null hides them all
    (used during the battle so only the canvas shows). */
@@ -124,10 +132,66 @@ function showScreen(name) {
   });
 }
 
+/* Show or hide the on-screen touch buttons (only on touch devices). */
+function setTouchControls(on) {
+  if (!dom.touch) return;
+  dom.touch.classList.toggle('hidden', !(on && IS_TOUCH));
+}
+
+/* ---------- 3b. Responsive layout ------------------------- */
+
+/* Recompute the sky height, robot scale and movement zones from the current
+   canvas size. Called on every resize and orientation change. */
+function layout() {
+  SKY_H = Math.round(VH * 0.42);
+  robotPixelScale = clamp(VH / 600, 0.72, 1.12);
+
+  const groundH = VH - SKY_H;
+  const top = SKY_H + groundH * 0.20;
+  // On touch we keep the robots in the upper part of the ground so the
+  // bottom corners stay free for the Fire / Special buttons.
+  const bottom = SKY_H + groundH * (IS_TOUCH ? 0.50 : 0.92);
+
+  PLAYER_ZONE = { xMin: VW * 0.06, xMax: VW * 0.42, yMin: top, yMax: bottom };
+  ENEMY_ZONE  = { xMin: VW * 0.58, xMax: VW * 0.94, yMin: top, yMax: bottom };
+}
+
+/* Match the canvas resolution to its on-screen size (times the pixel ratio for
+   sharpness) and rebuild everything that depends on the size. */
+function resize() {
+  const rect = canvas.getBoundingClientRect();
+  VW = Math.max(320, Math.round(rect.width));
+  VH = Math.max(240, Math.round(rect.height));
+  DPR = Math.min(window.devicePixelRatio || 1, IS_TOUCH ? 1.5 : 2);
+
+  canvas.width = Math.round(VW * DPR);
+  canvas.height = Math.round(VH * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);   // draw in CSS pixels from here on
+
+  layout();
+  rebuildScenery();
+
+  // Keep fighters inside the new zones if the screen changed mid-battle.
+  if (player) clampRobotToZone(player, PLAYER_ZONE);
+  if (enemy) clampRobotToZone(enemy, ENEMY_ZONE);
+  if (!player) { mouse.x = VW * 0.2; mouse.y = (SKY_H + VH) / 2; }
+
+  positionDragons();
+}
+
+function clampRobotToZone(r, z) {
+  r.x = clamp(r.x, z.xMin, z.xMax);
+  r.y = clamp(r.y, z.yMin, z.yMax);
+}
+
 /* ---------- 4a. Robot logic ------------------------------- */
 
 function makeRobot(def, side) {
   const isEnemy = side === 'enemy';
+  const zone = isEnemy ? ENEMY_ZONE : PLAYER_ZONE;
+  const midY = (zone.yMin + zone.yMax) / 2;
+  const scale = def.scale * robotPixelScale;
+
   // The enemy is tuned to be a little easier so the game stays fun and winnable.
   const dmgScale = isEnemy ? 0.75 : 1;
   const rateScale = isEnemy ? 1.2 : 1;
@@ -136,22 +200,20 @@ function makeRobot(def, side) {
     def: def,
     side: side,
     facing: isEnemy ? -1 : 1,                 // player faces right, enemy faces left
-    x: isEnemy ? 780 : 180,
-    y: 440,
-    boxW: 52 * def.scale,
-    boxH: 78 * def.scale,
-    scale: def.scale,
+    x: isEnemy ? zone.xMax - (zone.xMax - zone.xMin) * 0.3 : zone.xMin + (zone.xMax - zone.xMin) * 0.3,
+    y: midY,
+    scale: scale,
+    boxW: 52 * scale,
+    boxH: 78 * scale,
     maxHealth: def.maxHealth,
     health: def.maxHealth,
     moveSpeed: def.moveSpeed,
     hitFlash: 0,                              // counts down after taking a hit
     lastShot: 0,
-    // Cooldown bookkeeping for the player's Q and E (enemy ignores these).
     specialReadyAt: 0,
     shieldReadyAt: 0,
     shieldActive: false,
     shieldUntil: 0,
-    // Effective weapon after difficulty scaling.
     weapon: {
       count: def.weapon.count,
       fireRate: def.weapon.fireRate * rateScale,
@@ -160,10 +222,9 @@ function makeRobot(def, side) {
       bulletSize: def.weapon.bulletSize,
       spreadDeg: def.weapon.spreadDeg,
     },
-    // Enemy AI target, refreshed on a timer.
     aiTimer: 0,
-    aiTargetX: isEnemy ? 780 : 180,
-    aiTargetY: 440,
+    aiTargetX: 0,
+    aiTargetY: midY,
   };
 }
 
@@ -176,18 +237,17 @@ function fireWeapon(robot, special) {
   const baseAngle = robot.facing === 1 ? 0 : Math.PI;   // straight at the foe
   const muzzleX = robot.x + robot.facing * 30 * robot.scale;
   const muzzleY = robot.y - 6;
-  const color = special ? def.accent : (robot.def.color);
+  const color = special ? def.accent : def.color;
+  const list = robot.side === 'player' ? playerBullets : enemyBullets;
 
   for (let i = 0; i < count; i++) {
     let angle = baseAngle;
     if (count > 1) {
-      const t = count === 1 ? 0 : (i / (count - 1)) - 0.5;   // -0.5 .. 0.5
+      const t = (i / (count - 1)) - 0.5;                // -0.5 .. 0.5
       angle += t * (spreadDeg * Math.PI / 180);
     }
-    const list = robot.side === 'player' ? playerBullets : enemyBullets;
     list.push({
-      x: muzzleX,
-      y: muzzleY,
+      x: muzzleX, y: muzzleY,
       vx: Math.cos(angle) * w.bulletSpeed,
       vy: Math.sin(angle) * w.bulletSpeed,
       size: w.bulletSize,
@@ -197,8 +257,8 @@ function fireWeapon(robot, special) {
       special: !!special,
     });
   }
+  if (list.length > MAX_BULLETS) list.splice(0, list.length - MAX_BULLETS);
 
-  // A small muzzle flash so firing feels punchy.
   spawnParticles(muzzleX, muzzleY, color, special ? 10 : 4, special ? 3.5 : 2);
 }
 
@@ -220,6 +280,7 @@ function moveToward(robot, tx, ty, speed, dtScale) {
 /* ---------- 4b. Particles + explosions -------------------- */
 
 function spawnParticles(x, y, color, count, speed) {
+  if (LOW_FX) count = Math.max(2, Math.round(count * 0.55));   // lighter on mobile
   for (let i = 0; i < count; i++) {
     const a = rand(0, Math.PI * 2);
     const sp = rand(0.3, 1) * speed;
@@ -231,6 +292,9 @@ function spawnParticles(x, y, color, count, speed) {
       size: rand(2, 4),
       color: color,
     });
+  }
+  if (particles.length > MAX_PARTICLES) {
+    particles.splice(0, particles.length - MAX_PARTICLES);
   }
 }
 
@@ -255,37 +319,30 @@ function updateParticles(dtScale) {
 /* The dragons are mostly for show. They roam the sky, flap their wings and
    throw fireballs at each other to make the scene feel alive. */
 
-function makeDragon(x, baseY, color, dir) {
-  return {
-    x: x, y: baseY, baseY: baseY,
-    color: color,
-    dir: dir,                       // facing / travel direction: 1 right, -1 left
-    speed: rand(0.6, 0.9),
-    bob: rand(0, Math.PI * 2),
-    flap: rand(0, Math.PI * 2),
-    fireTimer: rand(1500, 3500),
-  };
-}
-
-function initDragons() {
-  dragons = [
-    makeDragon(220, 90,  '#2ff3ff', 1),
-    makeDragon(740, 150, '#ff3df0', -1),
-  ];
-  fireballs = [];
+function positionDragons() {
+  if (dragons.length === 0) {
+    dragons = [
+      { color: '#2ff3ff', dir: 1,  speed: rand(0.6, 0.9), bob: rand(0, 6.28), flap: 0, fireTimer: rand(1500, 3500), x: 0, y: 0, baseY: 0 },
+      { color: '#ff3df0', dir: -1, speed: rand(0.6, 0.9), bob: rand(0, 6.28), flap: 0, fireTimer: rand(1500, 3500), x: 0, y: 0, baseY: 0 },
+    ];
+  }
+  dragons[0].baseY = SKY_H * 0.34;
+  dragons[1].baseY = SKY_H * 0.6;
+  // Keep them on screen after a resize.
+  dragons[0].x = clamp(dragons[0].x || VW * 0.25, 60, VW - 60);
+  dragons[1].x = clamp(dragons[1].x || VW * 0.75, 60, VW - 60);
 }
 
 function updateDragons(dtScale, dtMs) {
+  const amp = Math.min(22, SKY_H * 0.12);
   dragons.forEach(function (d) {
     d.x += d.dir * d.speed * dtScale;
-    // Bounce off the sides and turn around.
-    if (d.x < 80) { d.x = 80; d.dir = 1; }
-    if (d.x > CANVAS_W - 80) { d.x = CANVAS_W - 80; d.dir = -1; }
+    if (d.x < 60) { d.x = 60; d.dir = 1; }
+    if (d.x > VW - 60) { d.x = VW - 60; d.dir = -1; }
     d.bob += 0.03 * dtScale;
     d.flap += 0.18 * dtScale;
-    d.y = d.baseY + Math.sin(d.bob) * 22;
+    d.y = d.baseY + Math.sin(d.bob) * amp;
 
-    // Throw a fireball at the other dragon now and then.
     d.fireTimer -= dtMs;
     if (d.fireTimer <= 0) {
       const target = dragons.find(function (o) { return o !== d; });
@@ -301,11 +358,11 @@ function updateDragons(dtScale, dtMs) {
         });
         spawnParticles(d.x + d.dir * 26, d.y, d.color, 6, 2);
       }
-      d.fireTimer = rand(1800, 4200);
+      // Fewer fireballs on mobile so the sky stays cheap to draw.
+      d.fireTimer = rand(LOW_FX ? 2600 : 1800, LOW_FX ? 5200 : 4200);
     }
   });
 
-  // Move fireballs and pop them when they fade or reach a dragon.
   for (let i = fireballs.length - 1; i >= 0; i--) {
     const f = fireballs[i];
     f.x += f.vx * dtScale;
@@ -327,23 +384,21 @@ function updateDragons(dtScale, dtMs) {
 function updateBattle(dtScale, dtMs) {
   const t = now();
 
-  /* --- Player movement: chase the mouse inside the player's zone --- */
+  // Player follows the mouse / finger inside its zone.
   const tx = clamp(mouse.x, PLAYER_ZONE.xMin, PLAYER_ZONE.xMax);
   const ty = clamp(mouse.y, PLAYER_ZONE.yMin, PLAYER_ZONE.yMax);
   moveToward(player, tx, ty, player.moveSpeed, dtScale);
 
-  /* --- Player main fire (held spacebar) --- */
+  // Main fire (held spacebar or held Fire button).
   if (keys[' '] && t - player.lastShot >= player.weapon.fireRate) {
     fireWeapon(player, false);
     player.lastShot = t;
   }
 
-  /* --- Player shield timer --- */
-  if (player.shieldActive && t >= player.shieldUntil) {
-    player.shieldActive = false;
-  }
+  // Shield timer.
+  if (player.shieldActive && t >= player.shieldUntil) player.shieldActive = false;
 
-  /* --- Enemy AI: drift toward the player and fire on its own clock --- */
+  // Enemy AI: drift toward the player and fire on its own clock.
   enemy.aiTimer -= dtMs;
   if (enemy.aiTimer <= 0) {
     enemy.aiTargetX = rand(ENEMY_ZONE.xMin, ENEMY_ZONE.xMax);
@@ -356,19 +411,15 @@ function updateBattle(dtScale, dtMs) {
     enemy.lastShot = t;
   }
 
-  /* --- Move bullets and drop the ones that leave the arena --- */
   updateBullets(playerBullets, dtScale);
   updateBullets(enemyBullets, dtScale);
 
-  /* --- Collisions --- */
   resolveHits(playerBullets, enemy, false);     // player shots hit the enemy
   resolveHits(enemyBullets, player, true);       // enemy shots hit the player
 
-  /* --- Cool down the hit flash --- */
   if (player.hitFlash > 0) player.hitFlash -= dtMs;
   if (enemy.hitFlash > 0) enemy.hitFlash -= dtMs;
 
-  /* --- Check for a result --- */
   if (enemy.health <= 0 && state === 'battle') endBattle('win');
   else if (player.health <= 0 && state === 'battle') endBattle('lose');
 }
@@ -378,13 +429,10 @@ function updateBullets(list, dtScale) {
     const b = list[i];
     b.x += b.vx * dtScale;
     b.y += b.vy * dtScale;
-    if (b.x < -30 || b.x > CANVAS_W + 30 || b.y < -30 || b.y > CANVAS_H + 30) {
-      list.splice(i, 1);
-    }
+    if (b.x < -30 || b.x > VW + 30 || b.y < -30 || b.y > VH + 30) list.splice(i, 1);
   }
 }
 
-/* Check a list of bullets against one robot. */
 function resolveHits(list, target, targetIsPlayer) {
   const halfW = target.boxW / 2;
   const halfH = target.boxH / 2;
@@ -395,8 +443,7 @@ function resolveHits(list, target, targetIsPlayer) {
     if (!hit) continue;
 
     if (targetIsPlayer && target.shieldActive) {
-      // Shield blocks the shot completely.
-      spawnParticles(b.x, b.y, '#2ff3ff', 8, 3);
+      spawnParticles(b.x, b.y, '#2ff3ff', 8, 3);     // shield blocks the shot
     } else {
       target.health = Math.max(0, target.health - b.damage);
       target.hitFlash = 120;
@@ -417,23 +464,25 @@ function endBattle(outcome) {
   dom.resultSub.textContent = outcome === 'win'
     ? 'Your robot stands tall. Press R or tap Restart to battle again.'
     : 'Your robot is down. Press R or tap Restart to try another fighter.';
+  setTouchControls(false);
   showScreen('gameover');
 }
 
 /* ---------- 5. Rendering ---------------------------------- */
 
-function initBackground() {
+function rebuildScenery() {
   stars = [];
-  for (let i = 0; i < 70; i++) {
-    stars.push({ x: rand(0, CANVAS_W), y: rand(0, SKY_H), r: rand(0.5, 1.6), seed: rand(0, 100) });
+  const starCount = LOW_FX ? 36 : 70;
+  for (let i = 0; i < starCount; i++) {
+    stars.push({ x: rand(0, VW), y: rand(0, SKY_H), r: rand(0.5, 1.6), seed: rand(0, 100) });
   }
   buildings = [];
   let bx = 0;
-  while (bx < CANVAS_W) {
+  while (bx < VW) {
     const w = rand(38, 80);
     buildings.push({
       x: bx, w: w,
-      h: rand(60, 150),
+      h: rand(SKY_H * 0.28, SKY_H * 0.7),
       color: Math.random() < 0.5 ? '#2ff3ff' : '#ff3df0',
     });
     bx += w + rand(6, 22);
@@ -446,7 +495,7 @@ function drawBackground(dtScale) {
   sky.addColorStop(0, '#070a23');
   sky.addColorStop(1, '#241247');
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, CANVAS_W, SKY_H);
+  ctx.fillRect(0, 0, VW, SKY_H);
 
   // Twinkling stars.
   const t = now() / 600;
@@ -459,12 +508,11 @@ function drawBackground(dtScale) {
   });
   ctx.globalAlpha = 1;
 
-  // City skyline silhouettes sitting on the horizon.
+  // City skyline silhouettes on the horizon.
   buildings.forEach(function (b) {
     const top = SKY_H - b.h;
     ctx.fillStyle = '#0b0e2e';
     ctx.fillRect(b.x, top, b.w, b.h);
-    // Neon roof line.
     ctx.strokeStyle = b.color;
     ctx.globalAlpha = 0.7;
     ctx.lineWidth = 2;
@@ -473,7 +521,6 @@ function drawBackground(dtScale) {
     ctx.lineTo(b.x + b.w, top);
     ctx.stroke();
     ctx.globalAlpha = 1;
-    // A few lit windows.
     ctx.fillStyle = b.color;
     for (let wy = top + 10; wy < SKY_H - 6; wy += 16) {
       for (let wx = b.x + 6; wx < b.x + b.w - 6; wx += 14) {
@@ -491,49 +538,45 @@ function drawBackground(dtScale) {
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, SKY_H);
-  ctx.lineTo(CANVAS_W, SKY_H);
+  ctx.lineTo(VW, SKY_H);
   ctx.stroke();
 
   // Ground.
-  let ground = ctx.createLinearGradient(0, SKY_H, 0, CANVAS_H);
+  let ground = ctx.createLinearGradient(0, SKY_H, 0, VH);
   ground.addColorStop(0, '#140a2c');
   ground.addColorStop(1, '#060414');
   ctx.fillStyle = ground;
-  ctx.fillRect(0, SKY_H, CANVAS_W, CANVAS_H - SKY_H);
+  ctx.fillRect(0, SKY_H, VW, VH - SKY_H);
 
   // Neon perspective grid floor.
   gridOffset += 0.004 * dtScale;
   if (gridOffset > 1) gridOffset -= 1;
   ctx.strokeStyle = 'rgba(47, 243, 255, 0.18)';
   ctx.lineWidth = 1;
-  // Horizontal lines that appear to rush toward the viewer.
   for (let i = 0; i < 14; i++) {
-    const f = ((i + gridOffset) / 14);
-    const y = SKY_H + f * f * (CANVAS_H - SKY_H);
+    const f = (i + gridOffset) / 14;
+    const y = SKY_H + f * f * (VH - SKY_H);
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(CANVAS_W, y);
+    ctx.lineTo(VW, y);
     ctx.stroke();
   }
-  // Vertical lines fanning out from a vanishing point.
   for (let i = -6; i <= 6; i++) {
     ctx.beginPath();
-    ctx.moveTo(CANVAS_W / 2, SKY_H);
-    ctx.lineTo(CANVAS_W / 2 + i * 150, CANVAS_H);
+    ctx.moveTo(VW / 2, SKY_H);
+    ctx.lineTo(VW / 2 + i * (VW / 12), VH);
     ctx.stroke();
   }
 }
 
 function drawDragon(d) {
-  const flap = Math.sin(d.flap) * 0.6;     // wing angle
+  const flap = Math.sin(d.flap) * 0.6;
   ctx.save();
   ctx.translate(d.x, d.y);
-  ctx.scale(d.dir, 1);                      // face the travel direction
+  ctx.scale(d.dir, 1);
 
-  ctx.shadowColor = d.color;
-  ctx.shadowBlur = 16;
+  if (!LOW_FX) { ctx.shadowColor = d.color; ctx.shadowBlur = 16; }
 
-  // Tail.
   ctx.strokeStyle = d.color;
   ctx.lineWidth = 4;
   ctx.beginPath();
@@ -541,7 +584,6 @@ function drawDragon(d) {
   ctx.quadraticCurveTo(-40, -6, -52, 6);
   ctx.stroke();
 
-  // Wings (flap up and down).
   ctx.fillStyle = d.color;
   ctx.globalAlpha = 0.85;
   ctx.beginPath();
@@ -558,18 +600,14 @@ function drawDragon(d) {
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Body.
   ctx.beginPath();
   ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2);
   ctx.fill();
-
-  // Head + snout.
   ctx.beginPath();
   ctx.arc(22, -3, 9, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillRect(26, -4, 12, 5);
 
-  // Glowing eye.
   ctx.shadowBlur = 0;
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
@@ -582,8 +620,7 @@ function drawDragon(d) {
 function drawFireballs() {
   fireballs.forEach(function (f) {
     ctx.save();
-    ctx.shadowColor = f.color;
-    ctx.shadowBlur = 14;
+    if (!LOW_FX) { ctx.shadowColor = f.color; ctx.shadowBlur = 14; }
     ctx.globalAlpha = clamp(f.life, 0, 1);
     ctx.fillStyle = '#fff6c2';
     ctx.beginPath();
@@ -598,8 +635,8 @@ function drawFireballs() {
   });
 }
 
-/* Draw a single robot. The shapes are simple boxes and lines, with a few
-   per-type flourishes so the five fighters look different. */
+/* Draw a single robot. Simple boxes and lines, with a few per-type flourishes
+   so the five fighters look different. */
 function drawRobot(r) {
   const s = r.scale;
   const body = r.hitFlash > 0 ? '#ffffff' : r.def.color;
@@ -608,7 +645,6 @@ function drawRobot(r) {
   ctx.save();
   ctx.translate(r.x, r.y);
 
-  // Ground shadow.
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.beginPath();
   ctx.ellipse(0, r.boxH / 2 + 4, 26 * s, 7 * s, 0, 0, Math.PI * 2);
@@ -616,41 +652,32 @@ function drawRobot(r) {
 
   ctx.scale(r.facing, 1);          // mirror so it faces the foe
 
-  // Legs.
   ctx.fillStyle = '#2a2350';
   ctx.fillRect(-16 * s, 14 * s, 10 * s, 24 * s);
   ctx.fillRect(6 * s, 14 * s, 10 * s, 24 * s);
 
-  // Body (rounded-ish block) with a neon glow.
-  ctx.shadowColor = body;
-  ctx.shadowBlur = 14;
+  if (!LOW_FX) { ctx.shadowColor = body; ctx.shadowBlur = 14; }
   ctx.fillStyle = body;
   roundRect(-20 * s, -22 * s, 40 * s, 40 * s, 7 * s);
   ctx.fill();
   ctx.shadowBlur = 0;
 
-  // Chest light.
   ctx.fillStyle = accent;
   roundRect(-7 * s, -10 * s, 14 * s, 14 * s, 4 * s);
   ctx.fill();
 
-  // Head.
   ctx.fillStyle = body;
   roundRect(-12 * s, -38 * s, 24 * s, 16 * s, 5 * s);
   ctx.fill();
-  // Eye visor.
   ctx.fillStyle = '#04121a';
   ctx.fillRect(-8 * s, -33 * s, 16 * s, 5 * s);
   ctx.fillStyle = accent;
   ctx.fillRect(2 * s, -33 * s, 5 * s, 5 * s);
 
-  // Cannon / weapon, always on the facing (right after mirroring) side.
-  ctx.fillStyle = '#3a3470';
   drawWeaponByShape(r.def.shape, s, accent);
 
   ctx.restore();
 
-  // Shield bubble (drawn unmirrored so it stays a clean circle).
   if (r.shieldActive) {
     ctx.save();
     ctx.translate(r.x, r.y - 4);
@@ -664,7 +691,6 @@ function drawRobot(r) {
     ctx.restore();
   }
 
-  // "YOU" marker above the player so it is easy to follow.
   if (r.side === 'player') {
     ctx.fillStyle = '#59ff8f';
     ctx.font = 'bold 12px Orbitron, sans-serif';
@@ -673,29 +699,28 @@ function drawRobot(r) {
   }
 }
 
-/* The barrel(s) differ per robot type for a bit of character. */
 function drawWeaponByShape(shape, s, accent) {
   ctx.fillStyle = '#46408a';
   if (shape === 'tank') {
-    ctx.fillRect(16 * s, -6 * s, 26 * s, 12 * s);          // thick cannon
+    ctx.fillRect(16 * s, -6 * s, 26 * s, 12 * s);
   } else if (shape === 'sniper') {
-    ctx.fillRect(16 * s, -3 * s, 40 * s, 6 * s);           // long barrel
+    ctx.fillRect(16 * s, -3 * s, 40 * s, 6 * s);
     ctx.fillStyle = accent;
     ctx.fillRect(54 * s, -2 * s, 4 * s, 4 * s);
   } else if (shape === 'storm') {
-    ctx.fillRect(16 * s, -10 * s, 20 * s, 5 * s);          // three short barrels
+    ctx.fillRect(16 * s, -10 * s, 20 * s, 5 * s);
     ctx.fillRect(16 * s, -2 * s, 20 * s, 5 * s);
     ctx.fillRect(16 * s, 6 * s, 20 * s, 5 * s);
   } else if (shape === 'plasma') {
     ctx.fillRect(16 * s, -5 * s, 18 * s, 10 * s);
-    ctx.fillStyle = accent;                                 // glowing emitter
+    ctx.fillStyle = accent;
     ctx.beginPath();
     ctx.arc(36 * s, 0, 6 * s, 0, Math.PI * 2);
     ctx.fill();
   } else { // scout
     ctx.fillRect(16 * s, -3 * s, 24 * s, 6 * s);
     ctx.fillStyle = accent;
-    ctx.fillRect(-2 * s, -46 * s, 2 * s, 8 * s);            // little antenna
+    ctx.fillRect(-2 * s, -46 * s, 2 * s, 8 * s);
   }
 }
 
@@ -713,8 +738,7 @@ function drawBullets() {
   [playerBullets, enemyBullets].forEach(function (list) {
     list.forEach(function (b) {
       ctx.save();
-      ctx.shadowColor = b.color;
-      ctx.shadowBlur = b.special ? 18 : 10;
+      if (!LOW_FX) { ctx.shadowColor = b.color; ctx.shadowBlur = b.special ? 18 : 10; }
       ctx.fillStyle = b.color;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
@@ -739,37 +763,37 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-/* Health bars, special / shield meters and the controls hint. */
+/* Health bars, ability meters and (on desktop) the controls hint. */
 function drawHUD() {
-  drawHealth(20, 22, player, 'left');
-  drawHealth(CANVAS_W - 300, 22, enemy, 'right');
+  const barW = clamp(VW * 0.34, 150, 300);
+  drawHealth(14, 26, barW, player, 'left');
+  drawHealth(VW - 14 - barW, 26, barW, enemy, 'right');
 
-  // Player ability meters under the health bar.
   const t = now();
   const specialFrac = t >= player.specialReadyAt ? 1 : 1 - (player.specialReadyAt - t) / player.def.special.cooldown;
   const shieldFrac = player.shieldActive ? 1 : (t >= player.shieldReadyAt ? 1 : 1 - (player.shieldReadyAt - t) / player.def.shield.cooldown);
-  drawMeter(20, 58, 130, 'Q', specialFrac, '#ff3df0');
-  drawMeter(168, 58, 130, 'E', shieldFrac, player.shieldActive ? '#7ff7ff' : '#2ff3ff');
+  const metW = clamp(VW * 0.15, 96, 140);
+  drawMeter(14, 54, metW, 'Q', specialFrac, '#ff3df0');
+  drawMeter(14 + metW + 10, 54, metW, 'E', shieldFrac, player.shieldActive ? '#7ff7ff' : '#2ff3ff');
 
-  // Controls reminder at the bottom.
-  ctx.fillStyle = 'rgba(234, 246, 255, 0.65)';
-  ctx.font = '13px Orbitron, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Mouse: move    Space: fire    Q: special    E: shield', CANVAS_W / 2, CANVAS_H - 16);
+  // The on-screen buttons explain themselves on touch, so only desktop needs text.
+  if (!IS_TOUCH) {
+    ctx.fillStyle = 'rgba(234, 246, 255, 0.65)';
+    ctx.font = '13px Orbitron, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Mouse: move    Space: fire    Q: special    E: shield', VW / 2, VH - 16);
+  }
 }
 
-function drawHealth(x, y, robot, align) {
-  const w = 280, h = 20;
+function drawHealth(x, y, w, robot, align) {
+  const h = 18;
   const frac = clamp(robot.health / robot.maxHealth, 0, 1);
 
-  // Name above the bar.
   ctx.fillStyle = '#eaf6ff';
-  ctx.font = 'bold 14px Orbitron, sans-serif';
+  ctx.font = 'bold 13px Orbitron, sans-serif';
   ctx.textAlign = align === 'right' ? 'right' : 'left';
-  const labelX = align === 'right' ? x + w : x;
-  ctx.fillText(robot.def.name + (robot.side === 'enemy' ? ' (Rival)' : ''), labelX, y - 6);
+  ctx.fillText(robot.def.name + (robot.side === 'enemy' ? ' (Rival)' : ''), align === 'right' ? x + w : x, y - 5);
 
-  // Track.
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
   roundRect(x, y, w, h, 6);
   ctx.fill();
@@ -777,25 +801,22 @@ function drawHealth(x, y, robot, align) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Fill (green when healthy, fading to red when low).
   const fillW = Math.max(0, w * frac);
-  const hue = 120 * frac;                          // 120 green -> 0 red
-  ctx.fillStyle = 'hsl(' + hue + ', 90%, 55%)';
+  ctx.fillStyle = 'hsl(' + (120 * frac) + ', 90%, 55%)';     // green when high, red when low
   if (fillW > 0) { roundRect(x, y, fillW, h, 6); ctx.fill(); }
 
-  // HP number.
   ctx.fillStyle = '#04121a';
-  ctx.font = 'bold 12px Orbitron, sans-serif';
+  ctx.font = 'bold 11px Orbitron, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(Math.ceil(robot.health) + ' / ' + robot.maxHealth, x + w / 2, y + 14);
+  ctx.fillText(Math.ceil(robot.health) + ' / ' + robot.maxHealth, x + w / 2, y + 13);
 }
 
 function drawMeter(x, y, w, label, frac, color) {
-  const h = 12;
+  const h = 11;
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
   ctx.font = 'bold 11px Orbitron, sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(label, x, y + 10);
+  ctx.fillText(label, x, y + 9);
 
   const bx = x + 16;
   const bw = w - 16;
@@ -805,27 +826,21 @@ function drawMeter(x, y, w, label, frac, color) {
   ctx.fillStyle = color;
   const f = clamp(frac, 0, 1);
   if (f > 0) { roundRect(bx, y, bw * f, h, 4); ctx.fill(); }
-  if (f >= 1) {                                    // glow when ready
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
+  if (f >= 1) { ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke(); }   // glow when ready
 }
 
 /* ---------- The main loop --------------------------------- */
 
 function loop(ts) {
-  const dtMs = Math.min(ts - lastTime || 16, 50);  // cap so a tab switch cannot jump the sim
+  const dtMs = Math.min(ts - lastTime || 16, 50);   // cap so a tab switch cannot jump the sim
   lastTime = ts;
-  const dtScale = dtMs / 16.67;                     // 1 at 60fps
+  const dtScale = dtMs / 16.67;                      // 1 at 60fps
 
-  // Dragons and the background animate in every screen so menus feel alive.
   updateDragons(dtScale, dtMs);
   updateParticles(dtScale);
   if (state === 'battle') updateBattle(dtScale, dtMs);
 
-  // ---- Render ----
-  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.clearRect(0, 0, VW, VH);
   drawBackground(dtScale);
   dragons.forEach(drawDragon);
   drawFireballs();
@@ -849,21 +864,21 @@ function startBattle(robotId) {
   const def = getRobotDef(robotId);
   if (!def) return;
   player = makeRobot(def, 'player');
-  // The rival is a random robot from the same line-up.
-  const enemyDef = ROBOTS[Math.floor(rand(0, ROBOTS.length))];
+  const enemyDef = ROBOTS[Math.floor(rand(0, ROBOTS.length))];   // random rival
   enemy = makeRobot(enemyDef, 'enemy');
 
   playerBullets = [];
   enemyBullets = [];
   particles = [];
+  keys[' '] = false;
   mouse.x = player.x;
   mouse.y = player.y;
 
   state = 'battle';
   showScreen(null);
+  setTouchControls(true);
 }
 
-/* Build the five selectable robot cards, each with a mini preview + stat bars. */
 function buildCards() {
   dom.cards.innerHTML = '';
   ROBOTS.forEach(function (def) {
@@ -871,7 +886,6 @@ function buildCards() {
     card.className = 'card';
     card.dataset.id = def.id;
 
-    // Mini robot preview drawn on a small canvas.
     const mini = document.createElement('canvas');
     mini.width = 64; mini.height = 64;
     card.appendChild(mini);
@@ -891,6 +905,11 @@ function buildCards() {
     card.appendChild(makeStatRow('SPD', def.stats.speed, '#2ff3ff'));
     card.appendChild(makeStatRow('HP', def.stats.health, '#59ff8f'));
     card.appendChild(makeStatRow('PWR', def.stats.power, '#ff3df0'));
+
+    const badge = document.createElement('div');
+    badge.className = 'card-badge';
+    badge.textContent = 'Selected';
+    card.appendChild(badge);
 
     card.addEventListener('click', function () {
       selectedRobotId = def.id;
@@ -922,7 +941,6 @@ function makeStatRow(label, value, color) {
   return row;
 }
 
-/* A tiny version of the robot for the selection cards. */
 function drawMiniRobot(c, def) {
   c.clearRect(0, 0, 64, 64);
   c.save();
@@ -930,15 +948,15 @@ function drawMiniRobot(c, def) {
   c.shadowColor = def.color;
   c.shadowBlur = 8;
   c.fillStyle = def.color;
-  c.fillRect(-14, -16, 28, 28);                 // body
-  c.fillRect(-9, -28, 18, 12);                  // head
+  c.fillRect(-14, -16, 28, 28);
+  c.fillRect(-9, -28, 18, 12);
   c.shadowBlur = 0;
   c.fillStyle = def.accent;
-  c.fillRect(-5, -7, 10, 10);                   // chest light
+  c.fillRect(-5, -7, 10, 10);
   c.fillStyle = '#04121a';
-  c.fillRect(-6, -25, 12, 4);                   // visor
+  c.fillRect(-6, -25, 12, 4);
   c.fillStyle = '#3a3470';
-  c.fillRect(14, -4, 16, 8);                    // little cannon
+  c.fillRect(14, -4, 16, 8);
   c.restore();
 }
 
@@ -947,7 +965,34 @@ function goToSelect() {
   dom.startBattleBtn.disabled = true;
   document.querySelectorAll('.card').forEach(function (c) { c.classList.remove('selected'); });
   state = 'select';
+  setTouchControls(false);
   showScreen('select');
+}
+
+/* Attempt to lock to landscape. This works on Android when in fullscreen and
+   is silently ignored on iOS, so it is wrapped in a try / catch. */
+function tryLockLandscape() {
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('landscape').catch(function () {});
+    }
+  } catch (e) { /* not supported on this device */ }
+}
+
+/* Bind a button so holding it counts as "held" (used for continuous fire). */
+function bindHold(btn, onDown, onUp) {
+  btn.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    btn.classList.add('pressed');
+    try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+    onDown();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) {
+    btn.addEventListener(ev, function () {
+      btn.classList.remove('pressed');
+      if (onUp) onUp();
+    });
+  });
 }
 
 function init() {
@@ -961,35 +1006,55 @@ function init() {
   dom.startBattleBtn = document.getElementById('start-battle-btn');
   dom.resultText = document.getElementById('result-text');
   dom.resultSub = document.getElementById('result-sub');
+  dom.touch = document.getElementById('touch-controls');
 
-  initBackground();
-  initDragons();
+  if (IS_TOUCH) document.body.classList.add('is-touch');
+
+  resize();
+  positionDragons();
   buildCards();
 
-  // --- Buttons ---
-  document.getElementById('play-btn').addEventListener('click', goToSelect);
+  // --- Menu buttons ---
+  document.getElementById('play-btn').addEventListener('click', function () {
+    tryLockLandscape();
+    goToSelect();
+  });
   dom.startBattleBtn.addEventListener('click', function () {
     if (selectedRobotId) startBattle(selectedRobotId);
   });
   document.getElementById('restart-btn').addEventListener('click', goToSelect);
 
-  // --- Mouse: track position in canvas coordinates (accounting for scaling) ---
-  canvas.addEventListener('mousemove', function (e) {
+  // --- Movement: pointer events cover both mouse (hover) and touch (drag) ---
+  function pointerToCanvas(e) {
     const rect = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - rect.left) * (CANVAS_W / rect.width);
-    mouse.y = (e.clientY - rect.top) * (CANVAS_H / rect.height);
+    mouse.x = (e.clientX - rect.left) * (VW / rect.width);
+    mouse.y = (e.clientY - rect.top) * (VH / rect.height);
     mouse.inside = true;
-  });
-  canvas.addEventListener('mouseleave', function () { mouse.inside = false; });
+  }
+  canvas.addEventListener('pointerdown', function (e) { e.preventDefault(); pointerToCanvas(e); }, { passive: false });
+  canvas.addEventListener('pointermove', function (e) { pointerToCanvas(e); }, { passive: false });
+  canvas.addEventListener('pointerleave', function () { mouse.inside = false; });
 
-  // --- Keyboard ---
+  // --- Touch action buttons ---
+  bindHold(document.getElementById('fire-btn'),
+    function () { keys[' '] = true; },
+    function () { keys[' '] = false; });
+  document.getElementById('special-btn').addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (state === 'battle') trySpecial();
+  });
+  document.getElementById('shield-btn').addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (state === 'battle') tryShield();
+  });
+  // Safety: releasing anywhere stops continuous fire.
+  window.addEventListener('pointerup', function () { keys[' '] = false; });
+
+  // --- Keyboard (desktop) ---
   window.addEventListener('keydown', function (e) {
     const k = e.key.toLowerCase();
     keys[e.key] = true;
-
-    // Stop the spacebar from scrolling the page during battle.
-    if (e.key === ' ') e.preventDefault();
-
+    if (e.key === ' ') e.preventDefault();        // do not scroll the page
     if (state === 'battle' && !e.repeat) {
       if (k === 'q') trySpecial();
       if (k === 'e') tryShield();
@@ -998,10 +1063,14 @@ function init() {
   });
   window.addEventListener('keyup', function (e) { keys[e.key] = false; });
 
+  // --- Keep the canvas matched to the screen ---
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 200); });
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+
   requestAnimationFrame(loop);
 }
 
-/* Q: fire the special weapon if its cooldown has finished. */
 function trySpecial() {
   const t = now();
   if (t < player.specialReadyAt) return;
@@ -1009,7 +1078,6 @@ function trySpecial() {
   player.specialReadyAt = t + player.def.special.cooldown;
 }
 
-/* E: raise the shield if its cooldown has finished. */
 function tryShield() {
   const t = now();
   if (player.shieldActive || t < player.shieldReadyAt) return;

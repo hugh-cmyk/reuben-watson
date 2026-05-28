@@ -2,11 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- maximum-scale + user-scalable stop double-tap and pinch zoom on mobile;
+       viewport-fit=cover lets the game reach under notches. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Robot &amp; Dragon Battle</title>
 
-  <!-- Orbitron gives the menus a clean sci-fi feel. It degrades to a system
-       sans-serif if the font fails to load, so the game still works offline. -->
+  <!-- Orbitron gives the menus a clean sci-fi feel and degrades to a system
+       font if it fails to load, so the game still works offline. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
@@ -15,9 +17,18 @@
 </head>
 <body>
   <!-- Everything is layered inside this wrapper: the canvas does the battle
-       rendering, and the menu screens sit on top of it as overlays. -->
+       rendering, and the menu screens plus touch buttons sit on top of it. -->
   <div id="game-wrap">
-    <canvas id="game" width="960" height="600"></canvas>
+    <canvas id="game"></canvas>
+
+    <!-- On-screen controls. Shown only on touch devices during a battle.
+         Movement is a drag on the canvas, so these are tucked into the
+         bottom corners away from the robots, enemy and health bars. -->
+    <div id="touch-controls" class="hidden">
+      <button id="shield-btn" class="touch-btn touch-left touch-shield" type="button" aria-label="Shield"><span>Shield</span></button>
+      <button id="special-btn" class="touch-btn touch-left touch-special" type="button" aria-label="Special weapon"><span>Special</span></button>
+      <button id="fire-btn" class="touch-btn touch-right touch-fire" type="button" aria-label="Fire"><span>Fire</span></button>
+    </div>
 
     <!-- ===== Start screen ===== -->
     <div id="start-screen" class="overlay">
@@ -47,6 +58,14 @@
         <p id="result-sub" class="lead">Great battle. Press R or tap Restart to choose again.</p>
         <button id="restart-btn" class="btn btn-big">Restart</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Portrait prompt. CSS shows this only on touch devices held upright. -->
+  <div id="rotate-notice">
+    <div class="rotate-inner">
+      <div class="rotate-icon">📱</div>
+      <p class="rotate-text">Turn your device sideways to play</p>
     </div>
   </div>
 
