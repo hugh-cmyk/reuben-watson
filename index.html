@@ -2,66 +2,64 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <!-- maximum-scale + user-scalable stop double-tap and pinch zoom on mobile;
-       viewport-fit=cover lets the game reach under notches. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Robot &amp; Dragon Battle</title>
+  <title>Mech Battle (Reuben Watson)</title>
 
-  <!-- Orbitron gives the menus a clean sci-fi feel and degrades to a system
-       font if it fails to load, so the game still works offline. -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="styles.css">
+
+  <!-- Three.js is vendored locally (no build step, no CDN at runtime). The
+       import map lets game.js do `import * as THREE from 'three'`. -->
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three.module.min.js" } }
+  </script>
 </head>
 <body>
-  <!-- Everything is layered inside this wrapper: the canvas does the battle
-       rendering, and the menu screens plus touch buttons sit on top of it. -->
   <div id="game-wrap">
     <canvas id="game"></canvas>
 
-    <!-- On-screen controls. Shown only on touch devices during a battle.
-         Movement is a drag on the canvas, so these are tucked into the
-         bottom corners away from the robots, enemy and health bars. -->
-    <div id="touch-controls" class="hidden">
-      <button id="shield-btn" class="touch-btn touch-left touch-shield" type="button" aria-label="Shield"><span>Shield</span></button>
-      <button id="special-btn" class="touch-btn touch-left touch-special" type="button" aria-label="Special weapon"><span>Special</span></button>
-      <button id="fire-btn" class="touch-btn touch-right touch-fire" type="button" aria-label="Fire"><span>Fire</span></button>
+    <!-- ===== In-battle HUD (overlaid on the 3D canvas) ===== -->
+    <div id="hud" class="hidden">
+      <div id="crosshair"></div>
+
+      <!-- Player health, top-left -->
+      <div id="player-health"><span id="player-health-label">ARMOUR</span><div id="player-health-track"><div id="player-health-fill"></div></div></div>
+
+      <!-- Enemy markers / health bars are projected here each frame -->
+      <div id="markers"></div>
+
+      <!-- Left: virtual movement joystick -->
+      <div id="joystick"><div id="joystick-base"><div id="joystick-thumb"></div></div></div>
+
+      <!-- Right: shoot (big) with jump above it -->
+      <button id="jump-btn" class="action-btn" type="button" aria-label="Jump"><span>Jump</span></button>
+      <button id="shoot-btn" class="action-btn" type="button" aria-label="Shoot"><span>Shoot</span></button>
     </div>
 
     <!-- ===== Start screen ===== -->
     <div id="start-screen" class="overlay">
       <div class="panel">
         <p class="kicker">Reuben Watson presents</p>
-        <h1 class="title">Robot <span class="amp">&amp;</span> Dragon Battle</h1>
-        <p class="lead">Robots clash on the ground while dragons duel in the sky above. Pick your fighter and take on the rival machine.</p>
+        <h1 class="title">Mech Battle</h1>
+        <p class="lead">Pilot your mech across the canyon and take down the rival machine. Move with the left stick, shoot and jump on the right.</p>
         <button id="play-btn" class="btn btn-big">Play</button>
-      </div>
-    </div>
-
-    <!-- ===== Robot selection screen ===== -->
-    <div id="select-screen" class="overlay hidden">
-      <div class="panel panel-wide">
-        <h2 class="screen-heading">Choose your robot</h2>
-        <!-- Cards are built in game.js from the ROBOTS list so there is only
-             one place to edit a robot's stats. -->
-        <div id="cards" class="cards"></div>
-        <button id="start-battle-btn" class="btn btn-big" disabled>Start Battle</button>
       </div>
     </div>
 
     <!-- ===== Win / lose screen ===== -->
     <div id="gameover-screen" class="overlay hidden">
       <div class="panel">
-        <h2 id="result-text" class="result">You Win!</h2>
-        <p id="result-sub" class="lead">Great battle. Press R or tap Restart to choose again.</p>
+        <h2 id="result-text" class="result">Victory</h2>
+        <p id="result-sub" class="lead">The canyon is yours. Tap Restart to fight again.</p>
         <button id="restart-btn" class="btn btn-big">Restart</button>
       </div>
     </div>
   </div>
 
-  <!-- Portrait prompt. CSS shows this only on touch devices held upright. -->
+  <!-- Portrait prompt (CSS shows this only on touch devices held upright). -->
   <div id="rotate-notice">
     <div class="rotate-inner">
       <div class="rotate-icon">📱</div>
@@ -69,8 +67,8 @@
     </div>
   </div>
 
-  <p class="footnote">Move with the mouse. Space fires. Q is your special, E is your shield, R restarts.</p>
+  <p class="footnote">Desktop test controls: WASD to move, J or click to shoot, Space to jump, R to restart.</p>
 
-  <script src="game.js"></script>
+  <script type="module" src="game.js"></script>
 </body>
 </html>

@@ -1,22 +1,23 @@
 /* ============================================================
-   Robot & Dragon Battle - styling for the page and menu screens.
-   The battle itself is drawn on the <canvas>; this file styles the
-   page frame, the HTML overlay screens and the touch buttons.
+   Mech Battle - page, HUD and touch control styling.
+   The 3D battle is rendered by Three.js onto the <canvas>; this
+   file styles the page frame, the HUD overlay, the on-screen
+   joystick and buttons, and the menu screens.
 
-   Mobile-first: the base rules fill the screen for phones / tablets,
-   and a desktop media query at the end adds the framed card layout.
+   Mobile-first, tuned for iPad landscape. Touch controls scale
+   with viewport units and respect safe-area insets.
    ============================================================ */
 
 :root {
-  --bg-0: #05030f;
-  --bg-1: #0d0830;
-  --panel: rgba(12, 10, 38, 0.86);
+  --bg-0: #1a0f08;
+  --bg-1: #3a2418;
+  --panel: rgba(20, 14, 30, 0.86);
   --neon-cyan: #2ff3ff;
-  --neon-magenta: #ff3df0;
+  --neon-amber: #ffb13d;
   --neon-green: #59ff8f;
-  --neon-purple: #9a6bff;
-  --text: #eaf6ff;
-  --text-dim: #9aa6d6;
+  --neon-red: #ff5a4d;
+  --text: #f3ecdf;
+  --text-dim: #c6b7a6;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -25,11 +26,11 @@ html, body { height: 100%; }
 
 body {
   height: 100%;
-  background: linear-gradient(160deg, var(--bg-1), var(--bg-0));
+  background: var(--bg-0);
   color: var(--text);
   font-family: "Orbitron", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;                       /* no page scrolling while playing */
+  overflow: hidden;
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
@@ -37,350 +38,190 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ---- The game fills the screen by default (mobile / tablet) ---- */
+/* ---- The 3D view fills the screen ------------------------ */
 
-#game-wrap {
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-  background: var(--bg-0);
-}
+#game-wrap { position: fixed; inset: 0; overflow: hidden; background: #0a0705; }
 
 #game {
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--bg-0);
-  touch-action: none;                     /* no scroll / zoom on the play area */
-  cursor: crosshair;
+  touch-action: none;            /* no scroll / zoom while playing */
+}
+
+/* ---- HUD -------------------------------------------------- */
+
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+#hud.hidden { display: none; }
+
+/* Centre crosshair */
+#crosshair {
+  position: absolute;
+  left: 50%; top: 48%;
+  width: 34px; height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 2px solid rgba(89, 255, 143, 0.85);
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(89, 255, 143, 0.5);
+}
+#crosshair::before, #crosshair::after {
+  content: ""; position: absolute; background: rgba(89, 255, 143, 0.85);
+}
+#crosshair::before { left: 50%; top: -10px; width: 2px; height: 8px; margin-left: -1px; }
+#crosshair::after  { top: 50%; left: -10px; height: 2px; width: 8px; margin-top: -1px; }
+
+/* Player armour bar, top-left */
+#player-health {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + 16px);
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
+  width: clamp(160px, 26vw, 280px);
+}
+#player-health-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; color: var(--neon-cyan); }
+#player-health-track {
+  margin-top: 4px; height: 16px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.2); overflow: hidden;
+}
+#player-health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, var(--neon-green), #b6ff5a); transition: width 0.12s linear; }
+
+/* Enemy markers + health bars (positioned from JS) */
+#markers { position: absolute; inset: 0; }
+.enemy-marker {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  text-align: center;
+  width: 84px;
+}
+.enemy-marker .chevron { font-size: 0.9rem; color: var(--neon-red); text-shadow: 0 0 8px rgba(255, 90, 77, 0.8); line-height: 1; }
+.enemy-marker .ebar { margin-top: 2px; height: 7px; border-radius: 4px; background: rgba(0, 0, 0, 0.6); border: 1px solid rgba(255, 255, 255, 0.25); overflow: hidden; }
+.enemy-marker .efill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff5a4d, #ffb13d); }
+.enemy-marker .ename { margin-top: 2px; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.05em; color: #fff; text-shadow: 0 0 6px rgba(0,0,0,0.8); }
+
+/* ---- Virtual joystick (bottom-left) ---------------------- */
+
+#joystick { position: absolute; left: 0; bottom: 0; width: 46%; height: 62%; pointer-events: auto; }
+#joystick-base {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + 26px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+  width: clamp(120px, 26vw, 190px);
+  height: clamp(120px, 26vw, 190px);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(47, 243, 255, 0.10), rgba(0, 0, 0, 0.22));
+  border: 2px solid rgba(47, 243, 255, 0.4);
+  box-shadow: 0 0 20px rgba(47, 243, 255, 0.25);
+}
+#joystick-thumb {
+  position: absolute; left: 50%; top: 50%;
+  width: 44%; height: 44%;
+  margin: 0; transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #d9fbff, var(--neon-cyan));
+  box-shadow: 0 0 16px rgba(47, 243, 255, 0.6);
+}
+
+/* ---- Action buttons (bottom-right) ----------------------- */
+
+.action-btn {
+  position: absolute;
+  pointer-events: auto;
+  border: none; border-radius: 50%;
+  color: #1a0f08; font-family: inherit; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; -webkit-user-select: none; user-select: none;
+}
+.action-btn:active, .action-btn.pressed { transform: scale(0.93); filter: brightness(1.15); }
+
+#shoot-btn {
+  right: calc(env(safe-area-inset-right, 0px) + 24px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 26px);
+  width: clamp(104px, 21vw, 150px);
+  height: clamp(104px, 21vw, 150px);
+  font-size: clamp(0.85rem, 2.4vw, 1rem);
+  background: radial-gradient(circle at 35% 30%, #ffe1b0, var(--neon-amber));
+  box-shadow: 0 0 24px rgba(255, 177, 61, 0.6);
+}
+#jump-btn {
+  right: calc(env(safe-area-inset-right, 0px) + 24px + clamp(120px, 23vw, 168px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+  width: clamp(78px, 15vw, 110px);
+  height: clamp(78px, 15vw, 110px);
+  font-size: clamp(0.7rem, 2vw, 0.85rem);
+  background: radial-gradient(circle at 35% 30%, #d9fbff, var(--neon-cyan));
+  box-shadow: 0 0 18px rgba(47, 243, 255, 0.5);
 }
 
 /* ---- Overlay screens ------------------------------------- */
 
 .overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-  background: rgba(4, 3, 16, 0.6);
-  backdrop-filter: blur(4px);
-  text-align: center;
-  overflow-y: auto;                       /* scroll if a small screen is short */
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem; background: rgba(8, 5, 4, 0.6);
+  backdrop-filter: blur(4px); text-align: center; overflow-y: auto;
 }
-
 .overlay.hidden { display: none; }
 
 .panel {
-  width: min(560px, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  padding: 1.6rem 1.3rem;
+  width: min(560px, 100%); max-height: 100%; overflow-y: auto;
+  padding: 1.8rem 1.4rem;
   background: var(--panel);
-  border: 1px solid rgba(47, 243, 255, 0.35);
-  border-radius: 18px;
-  box-shadow: 0 0 30px rgba(47, 243, 255, 0.15), inset 0 0 30px rgba(154, 107, 255, 0.08);
+  border: 1px solid rgba(47, 243, 255, 0.35); border-radius: 18px;
+  box-shadow: 0 0 30px rgba(47, 243, 255, 0.15), inset 0 0 30px rgba(255, 177, 61, 0.06);
 }
 
-.panel-wide { width: min(840px, 100%); }
-
-.kicker {
-  font-size: clamp(0.66rem, 2vw, 0.8rem);
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--neon-magenta);
-  margin-bottom: 0.6rem;
-}
-
+.kicker { font-size: clamp(0.66rem, 2vw, 0.8rem); letter-spacing: 0.28em; text-transform: uppercase; color: var(--neon-amber); margin-bottom: 0.6rem; }
 .title {
-  font-size: clamp(1.7rem, 6vw, 3rem);
-  font-weight: 900;
-  line-height: 1.05;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: #fff;
-  text-shadow: 0 0 12px rgba(47, 243, 255, 0.7), 0 0 30px rgba(255, 61, 240, 0.4);
+  font-size: clamp(2rem, 7vw, 3.4rem); font-weight: 900; line-height: 1.04;
+  text-transform: uppercase; letter-spacing: 0.02em; color: #fff;
+  text-shadow: 0 0 12px rgba(47, 243, 255, 0.7), 0 0 30px rgba(255, 177, 61, 0.4);
 }
-
-.title .amp { color: var(--neon-magenta); }
-
-.screen-heading {
-  font-size: clamp(1.3rem, 4vw, 2rem);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 1rem;
-  color: #fff;
-  text-shadow: 0 0 12px rgba(47, 243, 255, 0.6);
-}
-
 .lead {
-  margin: 0.9rem auto 1.4rem;
-  max-width: 44ch;
-  font-size: clamp(0.9rem, 2.4vw, 0.98rem);
-  line-height: 1.55;
-  color: var(--text-dim);
+  margin: 0.9rem auto 1.4rem; max-width: 44ch;
+  font-size: clamp(0.9rem, 2.4vw, 0.98rem); line-height: 1.55; color: var(--text-dim);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-
-.result {
-  font-size: clamp(2rem, 8vw, 3.4rem);
-  font-weight: 900;
-  text-transform: uppercase;
-  color: #fff;
-}
-
+.result { font-size: clamp(2rem, 8vw, 3.4rem); font-weight: 900; text-transform: uppercase; color: #fff; }
 .result.win { text-shadow: 0 0 16px var(--neon-green), 0 0 36px rgba(89, 255, 143, 0.5); }
-.result.lose { text-shadow: 0 0 16px var(--neon-magenta), 0 0 36px rgba(255, 61, 240, 0.5); }
-
-/* ---- Buttons (large touch targets) ----------------------- */
+.result.lose { text-shadow: 0 0 16px var(--neon-red), 0 0 36px rgba(255, 90, 77, 0.5); }
 
 .btn {
-  font-family: inherit;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #04121a;
-  background: linear-gradient(180deg, #7ff7ff, var(--neon-cyan));
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
+  font-family: inherit; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+  color: #1a0f08; background: linear-gradient(180deg, #ffe1b0, var(--neon-amber));
+  border: none; border-radius: 999px; cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
-  box-shadow: 0 0 18px rgba(47, 243, 255, 0.55);
-  touch-action: manipulation;
+  box-shadow: 0 0 18px rgba(255, 177, 61, 0.55); touch-action: manipulation;
 }
-
-.btn-big {
-  padding: clamp(0.8rem, 2.4vw, 1rem) clamp(1.8rem, 6vw, 2.6rem);
-  font-size: clamp(1rem, 2.6vw, 1.1rem);
-  min-height: 52px;                       /* comfortable thumb target */
-}
-
-.btn:hover { transform: translateY(-2px); box-shadow: 0 0 26px rgba(47, 243, 255, 0.8); }
+.btn-big { padding: clamp(0.8rem, 2.4vw, 1rem) clamp(1.8rem, 6vw, 2.6rem); font-size: clamp(1rem, 2.6vw, 1.1rem); min-height: 52px; }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 0 26px rgba(255, 177, 61, 0.8); }
 .btn:active { transform: translateY(0); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; transform: none; }
-
-/* ---- Robot selection cards ------------------------------- */
-
-.cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.7rem;
-  justify-content: center;
-  margin-bottom: 1.2rem;
-}
-
-.card {
-  position: relative;
-  width: clamp(118px, 28vw, 140px);
-  padding: 0.85rem 0.6rem;
-  background: rgba(8, 6, 26, 0.9);
-  border: 1.5px solid rgba(154, 107, 255, 0.35);
-  border-radius: 14px;
-  cursor: pointer;
-  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
-  text-align: center;
-  touch-action: manipulation;
-}
-
-.card:hover {
-  transform: translateY(-3px);
-  border-color: var(--neon-cyan);
-  box-shadow: 0 0 18px rgba(47, 243, 255, 0.35);
-}
-
-/* The selected robot is made very obvious: green glow, lift and a badge. */
-.card.selected {
-  border-color: var(--neon-green);
-  box-shadow: 0 0 24px rgba(89, 255, 143, 0.6);
-  transform: translateY(-4px) scale(1.03);
-}
-
-.card canvas {
-  width: 60px;
-  height: 60px;
-  display: block;
-  margin: 0 auto 0.45rem;
-}
-
-.card-name {
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.card-tag {
-  margin: 0.25rem 0 0.5rem;
-  font-size: 0.62rem;
-  color: var(--text-dim);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  min-height: 2.4em;
-}
-
-.card-badge {
-  display: none;
-  margin-top: 0.5rem;
-  font-size: 0.6rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--neon-green);
-}
-.card.selected .card-badge { display: block; }
-
-.stat { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
-.stat-label { width: 24px; font-size: 0.58rem; color: var(--text-dim); font-family: monospace; text-align: left; }
-.stat-track { flex: 1; height: 5px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
-.stat-fill { height: 100%; border-radius: 3px; }
-
-/* ---- Touch action buttons -------------------------------- */
-
-#touch-controls {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;                   /* only the buttons catch touches */
-}
-#touch-controls.hidden { display: none; }
-
-.touch-btn {
-  position: absolute;
-  pointer-events: auto;
-  border: none;
-  border-radius: 50%;
-  color: #04121a;
-  font-family: inherit;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
-}
-
-.touch-btn:active, .touch-btn.pressed { transform: scale(0.93); filter: brightness(1.15); }
-
-/* Fire: big, bottom-right (right thumb). */
-.touch-fire {
-  right: calc(env(safe-area-inset-right, 0px) + 16px);
-  width: clamp(86px, 17vw, 124px);
-  height: clamp(86px, 17vw, 124px);
-  font-size: clamp(0.8rem, 2.4vw, 0.95rem);
-  background: radial-gradient(circle at 35% 30%, #ffffff, var(--neon-cyan));
-  box-shadow: 0 0 22px rgba(47, 243, 255, 0.6);
-}
-
-/* Special: big, bottom-left (left thumb). */
-.touch-special {
-  left: calc(env(safe-area-inset-left, 0px) + 16px);
-  width: clamp(80px, 16vw, 116px);
-  height: clamp(80px, 16vw, 116px);
-  font-size: clamp(0.72rem, 2.2vw, 0.88rem);
-  background: radial-gradient(circle at 35% 30%, #ffd0fb, var(--neon-magenta));
-  box-shadow: 0 0 20px rgba(255, 61, 240, 0.55);
-}
-
-/* Shield: smaller, stacked just above Special. */
-.touch-shield {
-  left: calc(env(safe-area-inset-left, 0px) + 16px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px + clamp(92px, 18vw, 130px));
-  width: clamp(60px, 12vw, 88px);
-  height: clamp(60px, 12vw, 88px);
-  font-size: clamp(0.6rem, 1.9vw, 0.72rem);
-  background: radial-gradient(circle at 35% 30%, #d9fbff, #2ff3ff);
-  box-shadow: 0 0 16px rgba(47, 243, 255, 0.5);
-}
 
 /* ---- Portrait rotate prompt ------------------------------ */
 
 #rotate-notice {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 2rem;
+  position: fixed; inset: 0; z-index: 50; display: none;
+  align-items: center; justify-content: center; text-align: center; padding: 2rem;
   background: linear-gradient(160deg, var(--bg-1), var(--bg-0));
 }
-
-/* Constrain the width so the message wraps inside the screen instead of
-   growing to its natural one-line width and overflowing. */
+@media (orientation: portrait) { body.is-touch #rotate-notice { display: flex; } }
 .rotate-inner { width: min(88vw, 420px); }
-
-/* Only block touch devices held upright, never desktop windows. The is-touch
-   class is set from JS so it stays in step with the on-screen buttons. */
-@media (orientation: portrait) {
-  body.is-touch #rotate-notice { display: flex; }
-}
-
-.rotate-icon {
-  font-size: clamp(3rem, 16vw, 5rem);
-  animation: rotateHint 2.2s ease-in-out infinite;
-}
-
-@keyframes rotateHint {
-  0%, 45% { transform: rotate(0deg); }
-  70%, 100% { transform: rotate(90deg); }
-}
-
-.rotate-text {
-  margin-top: 1.2rem;
-  font-size: clamp(1.2rem, 6vw, 1.9rem);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #fff;
-  text-shadow: 0 0 14px var(--neon-cyan);
-}
+.rotate-icon { font-size: clamp(3rem, 16vw, 5rem); animation: rotateHint 2.2s ease-in-out infinite; }
+@keyframes rotateHint { 0%, 45% { transform: rotate(0deg); } 70%, 100% { transform: rotate(90deg); } }
+.rotate-text { margin-top: 1.2rem; font-size: clamp(1.2rem, 6vw, 1.9rem); font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: #fff; text-shadow: 0 0 14px var(--neon-cyan); }
 
 /* ---- Footnote (desktop only) ----------------------------- */
 
-.footnote {
-  display: none;
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  text-align: center;
-}
-
-/* ---- Desktop: framed card on non-touch wide screens ------ */
-/* Gated on body:not(.is-touch) (set from JS) rather than a pointer media query,
-   so tablets like the iPad always get the fullscreen touch layout above even
-   though some report a fine pointer. */
-
+.footnote { display: none; }
 @media (min-width: 1000px) {
-  body:not(.is-touch) {
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.9rem;
-    padding: 1.5rem;
-    background:
-      radial-gradient(1200px 600px at 50% -10%, #1a1150 0%, transparent 60%),
-      linear-gradient(160deg, var(--bg-1), var(--bg-0));
+  body:not(.is-touch) .footnote {
+    display: block; position: fixed; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+    text-align: center; font-size: 0.76rem; color: var(--text-dim); pointer-events: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-
-  body:not(.is-touch) #game-wrap {
-    position: relative;
-    inset: auto;
-    width: min(94vw, 1060px);
-    height: min(84vh, 680px);
-    border-radius: 16px;
-    box-shadow:
-      0 0 0 2px rgba(47, 243, 255, 0.35),
-      0 0 36px rgba(47, 243, 255, 0.22),
-      0 18px 60px rgba(0, 0, 0, 0.6);
-  }
-
-  body:not(.is-touch) .footnote { display: block; }
 }
+
+/* Touch HUD controls only appear on touch devices */
+body:not(.is-touch) #joystick,
+body:not(.is-touch) #shoot-btn,
+body:not(.is-touch) #jump-btn { display: none; }
